@@ -42,9 +42,11 @@ export default function defineComponent(
     { props, factory }: IDefineComponentOpt,
 ) {
     let isClazz = false;
+
     if (isFunction(factory) && factory.prototype.render) {
         isClazz = true;
     }
+
     class Component extends HTMLElement {
         [x: string]: any;
         /**
@@ -63,14 +65,19 @@ export default function defineComponent(
         constructor() {
             super();
             if (!isClazz) {
-                this.handleComponentFactory();
+                this.handleFunctionalFactory();
             } else {
-                this.handleComponentClazz();
+                this.handleClazzFactory();
             }
         }
 
-        private safeRunLifeCycle(name: TLifeCycleName) {
+        private safeRunLifeCycle(name: TLifeCycleName | TLifeCycle) {
             if (!name) {
+                return;
+            }
+
+            if (isFunction(name)) {
+                name();
                 return;
             }
 
@@ -89,7 +96,7 @@ export default function defineComponent(
             (this.instance[name] as TLifeCycle)();
         }
 
-        private handleComponentClazz() {
+        private handleClazzFactory() {
             // 1. 创建一个响应式的属性对象
             this.props = observable.object<Record<string, unknown>>({});
             // @ts-ignore 2.创建实例
@@ -104,9 +111,9 @@ export default function defineComponent(
                 if (Component.isMounted) {
                     this.safeRunLifeCycle("onBeforeUpdate");
                 }
+                styleEl.textContent = this.instance.style();
                 // 通过lit-html的render将生成的模板html渲染到根节点
                 render(this.instance.render(this.props), root);
-                styleEl.textContent = this.instance.style();
                 // 渲染完之后，如果挂载完成 执行更新生命周期函数
                 if (Component.isMounted) {
                     this.safeRunLifeCycle("onUpdated");
@@ -117,13 +124,13 @@ export default function defineComponent(
             });
         }
 
-        private handleComponentFactory() {
+        private handleFunctionalFactory() {
             // 1. 创建一个响应式的属性对象
             this.props = observable.object<Record<string, unknown>>({});
             // 2. 将属性传递给工厂函数得到模板函数
             const template = (factory as IFactory).call(this, this.props);
             // 执行挂载前的生命周期钩子
-            each<TLifeCycle>(this.onBeforeMount, (cb) => cb());
+            each<TLifeCycle>(this.onBeforeMount, this.safeRunLifeCycle);
             // 3.创建一个影子根节点
             const root = this.attachShadow({ mode: "closed" });
             const styleEl = document.createElement("style");
@@ -132,10 +139,11 @@ export default function defineComponent(
             autorun(() => {
                 // 如果组件已经挂载完毕
                 if (Component.isMounted) {
-                    each<TLifeCycle>(this.onBeforeUpdate, (cb) => cb());
+                    each<TLifeCycle>(
+                        this.onBeforeUpdate,
+                        this.safeRunLifeCycle,
+                    );
                 }
-                // 通过lit-html的render将生成的模板html渲染到根节点
-                render(template(), root);
                 this.cssList &&
                     each(this.cssList, (css) => {
                         const css_text = isFunction(css) ? css() : css;
@@ -143,10 +151,11 @@ export default function defineComponent(
                             styleEl.textContent += css_text;
                         }
                     });
-                // styleEl.textContent =
+                // 通过lit-html的render将生成的模板html渲染到根节点
+                render(template(), root);
                 // 渲染完之后，如果挂载完成 执行更新生命周期函数
                 if (Component.isMounted) {
-                    each<TLifeCycle>(this.onUpdated, (cb) => cb());
+                    each<TLifeCycle>(this.onUpdated, this.safeRunLifeCycle);
                 } else {
                     // 执行完render 将isMounted置为true
                     Component.isMounted = true;
@@ -156,7 +165,7 @@ export default function defineComponent(
 
         connectedCallback() {
             if (!isClazz) {
-                each<TLifeCycle>(this.onMounted, (cb) => cb());
+                each<TLifeCycle>(this.onMounted, this.safeRunLifeCycle);
             } else {
                 this.safeRunLifeCycle("onMounted");
             }
@@ -164,7 +173,7 @@ export default function defineComponent(
 
         disconnectedCallback() {
             if (!isClazz) {
-                each<TLifeCycle>(this.onUnmounted, (cb) => cb());
+                each<TLifeCycle>(this.onUnmounted, this.safeRunLifeCycle);
             } else {
                 this.safeRunLifeCycle("onUnmounted");
             }
@@ -183,6 +192,7 @@ export default function defineComponent(
             this.props[name] = newValue;
         }
     }
+
     customElements.define(componentName, Component);
 }
 
