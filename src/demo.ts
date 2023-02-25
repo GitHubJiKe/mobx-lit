@@ -1,0 +1,2 @@
+import "./MyComponent";
+import "./MyChild";
